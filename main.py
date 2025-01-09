@@ -14,7 +14,9 @@ feeds = [
     {"name": "Carioca", "url": "https://ge.globo.com/busca/?q=Carioca&order=recent&species=not%C3%ADcias&from=now-1w"}
 ]
 
-# Função para gerar os itens do feed
+# Cache de links processados
+cache_links = {}
+
 def gerar_rss(feed):
     response = requests.get(feed["url"])
     soup = BeautifulSoup(response.text, "html.parser")
@@ -24,9 +26,21 @@ def gerar_rss(feed):
     url_selector = "a"
 
     rss_items = ""
+
+    # Inicializa o cache do feed se não existir
+    if feed["name"] not in cache_links:
+        cache_links[feed["name"]] = set()
+
     for item in soup.select(item_selector):
         title = item.select_one(title_selector).get_text(strip=True) if item.select_one(title_selector) else "Sem título"
         link = item.select_one(url_selector)["href"] if item.select_one(url_selector) else "#"
+
+        # Verifica se o link já foi processado
+        if link in cache_links[feed["name"]]:
+            continue  # Ignora notícias duplicadas
+
+        # Adiciona ao cache e ao feed
+        cache_links[feed["name"]].add(link)
         rss_items += f"""
         <item>
           <title>{title}</title>
@@ -34,9 +48,9 @@ def gerar_rss(feed):
           <pubDate>{datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT')}</pubDate>
         </item>
         """
+
     return rss_items
 
-# Rota para exibir o feed RSS
 @app.route("/<team>")
 def feed(team):
     feed = next((f for f in feeds if f["name"].lower() == team.lower()), None)
