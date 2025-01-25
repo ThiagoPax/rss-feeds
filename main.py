@@ -1,23 +1,25 @@
 from flask import Flask, Response
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
-import json
+from datetime import datetime, timedelta
+from urllib.parse import urlparse, urlunparse
 import os
+import json
 
 app = Flask(__name__)
 
-# Feeds configurados
+# Configuração dos feeds
 feeds = [
-    {"name": "Botafogo", "url": "https://ge.globo.com/futebol/times/botafogo/"},
-    {"name": "Flamengo", "url": "https://ge.globo.com/futebol/times/flamengo/"},
-    {"name": "Vasco", "url": "https://ge.globo.com/futebol/times/vasco/"},
-    {"name": "Fluminense", "url": "https://ge.globo.com/futebol/times/fluminense/"},
+    {"name": "Botafogo", "url": "https://ge.globo.com/busca/?q=Botafogo&order=recent&species=not%C3%ADcias"},
+    {"name": "Flamengo", "url": "https://ge.globo.com/busca/?q=Flamengo&order=recent&species=not%C3%ADcias"},
+    {"name": "Vasco", "url": "https://ge.globo.com/busca/?q=Vasco&order=recent&species=not%C3%ADcias"},
+    {"name": "Fluminense", "url": "https://ge.globo.com/busca/?q=Fluminense&order=recent&species=not%C3%ADcias"},
+    {"name": "Carioca", "url": "https://ge.globo.com/busca/?q=Carioca&order=recent&species=not%C3%ADcias&from=now-1w"}
 ]
 
 CACHE_FILE = "cache.json"
 
-# Carregar ou criar cache
+# Carrega o cache existente ou cria um novo
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r") as f:
         cache = json.load(f)
@@ -30,22 +32,20 @@ def save_cache():
         json.dump(cache, f)
 
 def normalize_url(url):
-    """Normaliza URLs removendo parâmetros desnecessários."""
-    from urllib.parse import urlparse, urlunparse
+    """Remove parâmetros desnecessários dos links."""
     parsed_url = urlparse(url)
-    return urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", "", ""))
+    clean_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", "", ""))
+    return clean_url
 
 def gerar_rss(feed):
-    """Gera RSS a partir do feed."""
     response = requests.get(feed["url"])
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # Seletores para extrair dados
-    item_selector = "div.feed-post-body"
-    title_selector = "a.feed-post-link"
-    url_selector = "a.feed-post-link"
+    item_selector = "li.widget--card.widget--info"
+    title_selector = "div.widget--info__title"
+    url_selector = "a"
 
-    # Inicializa cache para o feed
+    # Inicializa o cache para o feed, se não existir
     if feed["name"] not in cache:
         cache[feed["name"]] = {"links": set(), "titles": set()}
 
@@ -57,11 +57,11 @@ def gerar_rss(feed):
         link = item.select_one(url_selector)["href"] if item.select_one(url_selector) else "#"
         link = normalize_url(link)
 
-        # Evitar duplicações
+        # Verifica duplicação por link e título
         if link in cache[feed["name"]]["links"] or title in cache[feed["name"]]["titles"]:
             continue
 
-        # Adicionar ao cache e ao RSS
+        # Adiciona ao cache e ao feed
         cache[feed["name"]]["links"].add(link)
         cache[feed["name"]]["titles"].add(title)
         rss_items += f"""
@@ -72,6 +72,7 @@ def gerar_rss(feed):
         </item>
         """
 
+    # Salva o cache após processar
     save_cache()
     return rss_items
 
@@ -80,13 +81,12 @@ def feed(team):
     feed = next((f for f in feeds if f["name"].lower() == team.lower()), None)
     if not feed:
         return Response("Feed não encontrado.", status=404)
-    
     rss_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
     <rss version="2.0">
       <channel>
-        <title>Notícias do {feed['name']} - Globo Esporte</title>
+        <title>Notícias do {feed['name']} - ge.globo.com</title>
         <link>{feed['url']}</link>
-        <description>Últimas notícias do {feed['name']} no site Globo Esporte</description>
+        <description>Feed de notícias recentes do {feed['name']} no site ge.globo.com</description>
         <language>pt-BR</language>
         <lastBuildDate>{datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')}</lastBuildDate>
         {gerar_rss(feed)}
